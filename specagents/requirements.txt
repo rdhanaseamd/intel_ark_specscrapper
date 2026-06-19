@@ -1,0 +1,9 @@
+# Current runtime deps. (core/ uses only the standard library today;
+# PyYAML is needed once code loads agents/*/fields.yaml.)
+PyYAML>=6.0
+
+# Added as later layers land — uncomment when you build them:
+# httpx>=0.27        # ARK / OData fetcher
+# fastapi>=0.110     # agent registry API
+# uvicorn>=0.29      # ASGI server for the API
+# pytest>=8.0        # tests
