@@ -15,7 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # installed as we build later layers: pip install -e ".[fetch]" etc.
-fetch = ["httpx>=0.27"]     # OData / ARK client
+fetch = ["httpx>=0.27", "beautifulsoup4>=4.12"]     # OData / ARK client
 api = ["fastapi>=0.110", "uvicorn>=0.29"]
 dev = ["pytest>=8.0"]
 
