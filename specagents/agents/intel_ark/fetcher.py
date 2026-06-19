@@ -1,90 +1,108 @@
 """
-Intel ARK source adapter.
+Intel ARK source adapter (HTML scraping).
 
-Two ways to get raw rows:
-  - fetch_odata(...)  live OData call (needs network + verified endpoint)
-  - load_sample()     offline fixture, so the map+derive pipeline is testable now
+The old odata.intel.com host is dead (NXDOMAIN). ARK serves spec data in the
+product-page HTML: each spec value sits on an element carrying a `data-key`
+attribute whose value is Intel's internal key (e.g. ClockSpeed, MaxTDP,
+CoreCount) -- the same keys listed in raspi/scrapy-intel-ark's _legend.json.
+We parse those into {data_key: value}.
 
-EVERYTHING marked `# VERIFY` is an educated guess about Intel's API that
-cannot be confirmed from this environment. The first time you run this against
-a live endpoint, reconcile these names/URLs and the matching keys in fields.yaml.
+Paths to verify against a live page are marked `# VERIFY`.
+
+Three entry points:
+  fetch_product(url)     one product page -> raw dict
+  fetch_series(url)      a series page    -> list of product URLs
+  load_sample()          offline fixture  -> testable with no network
 """
 
-from typing import List
+import re
+from typing import Dict, List
+from urllib.parse import urljoin
 
-# VERIFY: Intel ARK has exposed OData at this host historically; confirm the
-# base URL, entity path, and whether it still requires no auth in 2026.
-ODATA_BASE = "https://odata.intel.com/API/v1_0/Products/Processors"
-ODATA_PAGE_SIZE = 100
+ARK_BASE = "https://ark.intel.com"
+# ark.intel.com blocks default client UAs; present a browser-like one.
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
+# product page URL pattern: /content/www/us/en/ark/products/<id>/<slug>.html
+PRODUCT_HREF = re.compile(r"/ark/products/\d+/[^\"'#]+\.html")
 
 
-def fetch_odata(odata_filter: str = "", top: int = ODATA_PAGE_SIZE) -> List[dict]:
-    """Pull raw processor rows from Intel ARK OData.
+def _get(url: str) -> str:
+    import httpx  # lazy; offline sample path needs no deps
+    with httpx.Client(timeout=30, headers=HEADERS, follow_redirects=True) as c:
+        r = c.get(url)
+        r.raise_for_status()
+        return r.text
 
-    httpx is imported lazily so the offline sample path has zero deps.
-    Install with: pip install -e ".[fetch]"
-    """
-    import httpx  # lazy; only needed for the live path
 
-    rows: List[dict] = []
-    skip = 0
-    params = {"$format": "json", "$top": str(top)}
-    if odata_filter:
-        params["$filter"] = odata_filter  # VERIFY: filter syntax/field names
+def parse_spec_page(html: str) -> Dict[str, str]:
+    """Extract {data_key: value} from an ARK product page."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
 
-    with httpx.Client(timeout=30, headers={"Accept": "application/json"}) as client:
-        while True:
-            params["$skip"] = str(skip)
-            resp = client.get(ODATA_BASE, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-            # VERIFY: OData v3/v4 wrap rows differently ("d"/"results" vs "value").
-            batch = data.get("value") or data.get("d", {}).get("results") or []
-            if not batch:
-                break
-            rows.extend(batch)
-            if len(batch) < top:
-                break
-            skip += top
-    return rows
+    specs: Dict[str, str] = {}
+    # VERIFY: confirm the value text sits on the element carrying data-key.
+    for el in soup.select("[data-key]"):
+        key = el.get("data-key")
+        val = el.get_text(strip=True)
+        if key and key not in specs:
+            specs[key] = val
+
+    # product display name from the page heading/title
+    h1 = soup.find("h1")
+    if h1:
+        specs["_ProductName"] = h1.get_text(strip=True)
+    elif soup.title:
+        specs["_ProductName"] = soup.title.get_text(strip=True)
+    return specs
+
+
+def fetch_product(url: str) -> Dict[str, str]:
+    return parse_spec_page(_get(url))
+
+
+def fetch_series(series_url: str) -> List[str]:
+    """Return absolute product-page URLs linked from a series page."""
+    html = _get(series_url)
+    hrefs = {urljoin(ARK_BASE, m.group(0)) for m in PRODUCT_HREF.finditer(html)}
+    return sorted(hrefs)
 
 
 # --- offline fixture -------------------------------------------------------
-# One Emerald Rapids 8562Y+ row keyed by the *guessed* ARK field names, so the
-# transform pipeline can be exercised end-to-end with no network. Replace these
-# keys with the real ones once verified.
-SAMPLE_RAW = [
+# Emerald Rapids 8562Y+ keyed by ARK's REAL spec keys (from _legend.json),
+# so the map+derive pipeline runs end-to-end with no network.
+SAMPLE_RAW: List[Dict] = [
     {
-        # direct fields (match fields.yaml 'direct' values)
         "ProcessorNumber": "8562Y+",
-        "ProductName": "Intel Xeon Platinum 8562Y+",
+        "_ProductName": "Intel\u00ae Xeon\u00ae Platinum 8562Y+ Processor",
+        "CodeNameText": "Products formerly Emerald Rapids",
+        "StatusCodeText": "Launched",
+        "BornOnDate": "Q4'23",
         "Lithography": "Intel 7",
-        "PackageCarrier": "FCLGA4677",
+        "SocketsSupported": "FCLGA4677",
         "Cache": "60 MB",
-        "TDP": "300 W",
+        "MaxTDP": "300 W",
         "CoreCount": "32",
-        "ScalabilitySockets": "2P",            # VERIFY: ARK may say "2S"
+        "MaxCPUs": "2",
         "ThreadCount": "64",
-        "ProcessorBaseFrequency": "2.80 GHz",
-        "MaxTurboFrequency": "4.10 GHz",
-        "AllCoreTurboFrequency": "3.80 GHz",
-        "MaxMemoryChannels": "8",
-        "MaxUPILinks": "80",                   # VERIFY: GMI/DMI mapping
-        "MaxPCIeLanes": "80",
-        "PCIeRevision": "Gen 5",
-        "RecommendedPrice1KU": "$5,945",
-        "LaunchDate": "12/14/2023",
-        # raw inputs used only by derivations
-        "CodeNameText": "Products formerly Emerald Rapids",  # VERIFY field name
-        "MemoryTypes": "DDR5-5600",            # VERIFY field name
-        # NOTE: the raw OPN code (e.g. "X5-8562Y+") is likely NOT an ARK field;
-        # it may come from your internal data. Left absent here on purpose so the
-        # composed-OPN fallback path is exercised. Provide it to use raw-first.
-        "OrderingCode": None,                  # VERIFY: source of raw OPN, if any
+        "HyperThreading": "Yes",
+        "ClockSpeed": "2.80 GHz",
+        "ClockSpeedMax": "4.10 GHz",
+        "NumMemoryChannels": "8",
+        "MemoryTypes": "DDR5",
+        "MemoryMaxSpeedMhz": "5600",
+        "UltraPathInterconnectLinks": "4",
+        "NumPCIExpressPorts": "80",
+        "PCIExpressRevision": "5.0",
+        "RecommendedCustomerPrice": "$5,945.00",
     }
 ]
 
 
-def load_sample() -> List[dict]:
-    """Offline raw rows for testing the pipeline without network."""
+def load_sample() -> List[Dict]:
     return [dict(r) for r in SAMPLE_RAW]

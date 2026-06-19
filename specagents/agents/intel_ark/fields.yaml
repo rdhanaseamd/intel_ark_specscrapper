@@ -1,57 +1,60 @@
-# Maps Intel ARK sections / OData fields -> flat SpecRecord fields.
-# 'direct' = read straight from ARK. 'derived' = produced by core/derive.py.
-# 'manual' = not on ARK; entered/sourced separately (business data).
-# Adding a new spec field later = add a line here, no scraper code change.
+# Maps Intel ARK spec keys -> flat SpecRecord fields.
+# Keys are ARK's real internal `data-key` values (see raspi/scrapy-intel-ark
+# _legend.json), read straight from the product page HTML.
+# 'direct' = read + light unit-strip. 'derived' = computed in core/derive.py.
+# 'manual' = not on ARK (business data). Adding a direct field = one line here.
 
 direct:
   Model:               ProcessorNumber
-  Processor_Name:      ProductName
   CCD_Technology:      Lithography
-  Package:             PackageCarrier        # e.g. FCLGA4677 / FCLGA1700
-  L3_Cache:            Cache                 # MB/GB string
-  TDP:                 TDP
-  Density:             CoreCount             # total cores
-  _1P_2P:              ScalabilitySockets    # 1P Only / 2P
-  Threads:            ThreadCount
-  Fbase:               ProcessorBaseFrequency
-  Fmax:                MaxTurboFrequency
-  All_Core_Boost_Freq: AllCoreTurboFrequency
-  DDR_Channels:        MaxMemoryChannels
-  GMI:                 MaxUPILinks           # Max # of DMI/UPI lanes
-  PCIe_Lanes:          MaxPCIeLanes
-  PCIe_Generation:     PCIeRevision          # 'Gen 5' -> 5
-  _1kU:                RecommendedPrice1KU
-  Forecast_Start_Date: LaunchDate            # or marketing status
+  Package:             SocketsSupported          # e.g. FCLGA4677
+  L3_Cache:            Cache                     # "60 MB" -> 60
+  TDP:                 MaxTDP                     # "300 W" -> 300
+  cTDP_Min:            ConfigTDPMin
+  cTDP_Max:            ConfigTDPMax
+  Density:             CoreCount                  # total cores
+  _1P_2P:              MaxCPUs                    # Max CPU Configuration; "2" -> "2P"
+  Threads:             ThreadCount
+  Fbase:               ClockSpeed                 # Processor Base Frequency
+  Fmax:                ClockSpeedMax              # Max Turbo Frequency
+  DDR_Channels:        NumMemoryChannels
+  GMI:                 UltraPathInterconnectLinks # VERIFY: UPI link count vs DMI lanes
+  PCIe_Lanes:          NumPCIExpressPorts
+  PCIe_Generation:     PCIExpressRevision         # "Gen 5" -> 5
+  _1kU:                RecommendedCustomerPrice
 
-# Parsed/computed in core/derive.py from the fields above (+ raw strings).
+# Computed in core/derive.py (+ a couple of raw inputs read in agent.py).
 derived:
-  Product:        classify_product(codename)
-  OPN:            build_opn(raw_spec_code, ...fallback...)
-  SMT:            infer_smt(threads, cores)
-  Fbase_Low:      freq_bounds(Fbase).low
-  Fbase_High:     freq_bounds(Fbase).high
-  Fmax_Low:       freq_bounds(Fmax).low
-  Fmax_High:      freq_bounds(Fmax).high
-  Max_DDR_Rate:   parse_memory(MemoryTypes).rate
-  DIMM_Technology: parse_memory(MemoryTypes).tech
+  Product:             classify_product(CodeNameText)
+  Processor_Name:      from page <h1>/title
+  Active:              StatusCodeText -> Y/N (Launched = Y)
+  Forecast_Start_Date: BornOnDate
+  SMT:                 HyperThreading (Yes->ON) else infer_smt(threads, cores)
+  Fbase_Low:           freq_bounds(Fbase).low
+  Fbase_High:          freq_bounds(Fbase).high
+  Fmax_Low:            freq_bounds(Fmax).low
+  Fmax_High:           freq_bounds(Fmax).high
+  Max_DDR_Rate:        MemoryMaxSpeedMhz else parse_memory(MemoryTypes).rate
+  DIMM_Technology:     parse_memory(MemoryTypes).tech
+  OPN:                 build_opn(raw_code, ...composed fallback...)
+  # All_Core_Boost_Freq: no clean ARK field; left blank / manual for now
 
-# Not on ARK — sourced/entered separately, surfaced in the UI for entry.
+# Not on ARK -- entered/sourced separately, surfaced in the UI for entry.
 manual:
   - UPFM_ID
   - OPN_Wave
   - OPN_Slot
   - OPN_Sub_Slot
-  - Active            # launched & still relevant judgement
-  - Roadmap           # Custom vs Roadmap
+  - Roadmap
   - Target_Customer
   - Target_Workload
   - ASP
+  - All_Core_Boost_Freq
   - IRM_Group
   - Prime_Sub
   - CCD_Distribution
   - IOD_Distribution
   - Sweeper
 
-# Per spec: leave empty.
 unused:
   - TPL_Version
