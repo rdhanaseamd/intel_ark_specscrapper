@@ -1,0 +1,2 @@
+# intel_ark_specscrapper
+Competitive specification scrapping
