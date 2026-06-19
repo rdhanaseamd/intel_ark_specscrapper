@@ -1,0 +1,57 @@
+# Maps Intel ARK sections / OData fields -> flat SpecRecord fields.
+# 'direct' = read straight from ARK. 'derived' = produced by core/derive.py.
+# 'manual' = not on ARK; entered/sourced separately (business data).
+# Adding a new spec field later = add a line here, no scraper code change.
+
+direct:
+  Model:               ProcessorNumber
+  Processor_Name:      ProductName
+  CCD_Technology:      Lithography
+  Package:             PackageCarrier        # e.g. FCLGA4677 / FCLGA1700
+  L3_Cache:            Cache                 # MB/GB string
+  TDP:                 TDP
+  Density:             CoreCount             # total cores
+  _1P_2P:              ScalabilitySockets    # 1P Only / 2P
+  Threads:            ThreadCount
+  Fbase:               ProcessorBaseFrequency
+  Fmax:                MaxTurboFrequency
+  All_Core_Boost_Freq: AllCoreTurboFrequency
+  DDR_Channels:        MaxMemoryChannels
+  GMI:                 MaxUPILinks           # Max # of DMI/UPI lanes
+  PCIe_Lanes:          MaxPCIeLanes
+  PCIe_Generation:     PCIeRevision          # 'Gen 5' -> 5
+  _1kU:                RecommendedPrice1KU
+  Forecast_Start_Date: LaunchDate            # or marketing status
+
+# Parsed/computed in core/derive.py from the fields above (+ raw strings).
+derived:
+  Product:        classify_product(codename)
+  OPN:            build_opn(raw_spec_code, ...fallback...)
+  SMT:            infer_smt(threads, cores)
+  Fbase_Low:      freq_bounds(Fbase).low
+  Fbase_High:     freq_bounds(Fbase).high
+  Fmax_Low:       freq_bounds(Fmax).low
+  Fmax_High:      freq_bounds(Fmax).high
+  Max_DDR_Rate:   parse_memory(MemoryTypes).rate
+  DIMM_Technology: parse_memory(MemoryTypes).tech
+
+# Not on ARK — sourced/entered separately, surfaced in the UI for entry.
+manual:
+  - UPFM_ID
+  - OPN_Wave
+  - OPN_Slot
+  - OPN_Sub_Slot
+  - Active            # launched & still relevant judgement
+  - Roadmap           # Custom vs Roadmap
+  - Target_Customer
+  - Target_Workload
+  - ASP
+  - IRM_Group
+  - Prime_Sub
+  - CCD_Distribution
+  - IOD_Distribution
+  - Sweeper
+
+# Per spec: leave empty.
+unused:
+  - TPL_Version
